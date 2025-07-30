@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>简易聊天</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
+    
+    <!-- Tailwind 配置 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3B82F6',
+                        secondary: '#10B981',
+                        dark: '#1E293B',
+                        light: '#F8FAFC',
+                        message: {
+                            mine: '#3B82F6',
+                            others: '#E2E8F0'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .chat-bubble-mine {
+                @apply bg-message-mine text-white rounded-2xl rounded-tr-none py-2 px-4 max-w-[80%] shadow-md;
+            }
+            .chat-bubble-others {
+                @apply bg-message-others text-dark rounded-2xl rounded-tl-none py-2 px-4 max-w-[80%] shadow-md;
+            }
+            .typing-indicator {
+                @apply flex space-x-1;
+            }
+            .typing-indicator span {
+                @apply h-2 w-2 bg-gray-500 rounded-full animate-bounce;
+            }
+            .typing-indicator span:nth-child(2) {
+                animation-delay: 0.2s;
+            }
+            .typing-indicator span:nth-child(3) {
+                animation-delay: 0.4s;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-dark min-h-screen font-sans">
+    <div class="max-w-md mx-auto bg-white dark:bg-gray-900 min-h-screen shadow-xl relative overflow-hidden">
+        <!-- 登录界面 -->
+        <div id="login-screen" class="absolute inset-0 z-30 bg-white dark:bg-gray-900 flex flex-col p-6">
+            <div class="text-center mb-12 mt-16">
+                <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary mb-4">
+                    <i class="fa fa-comments text-white text-2xl"></i>
+                </div>
+                <h1 class="text-[clamp(1.5rem,5vw,2.5rem)] font-bold text-gray-800 dark:text-white">简易聊天</h1>
+                <p class="text-gray-500 dark:text-gray-400 mt-2">连接朋友，畅所欲言</p>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label for="username" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">用户名</label>
+                    <input type="text" id="username" 
+                        class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-primary transition-all outline-none"
+                        placeholder="请输入你的名字" required>
+                </div>
+                
+                <button id="login-btn" 
+                    class="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 px-4 rounded-lg transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-lg hover:shadow-xl">
+                    进入聊天室
+                </button>
+            </div>
+            
+            <div class="mt-auto mb-6 text-center">
+                <button id="theme-toggle" class="text-gray-500 dark:text-gray-400 hover:text-primary dark:hover:text-primary transition-colors">
+                    <i class="fa fa-moon-o text-xl"></i>
+                </button>
+            </div>
+        </div>
+        
+        <!-- 聊天界面 -->
+        <div id="chat-screen" class="hidden flex flex-col h-screen">
+            <!-- 顶部导航 -->
+            <header class="bg-primary text-white p-4 shadow-md z-10">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 class="font-bold text-lg">聊天室</h2>
+                        <p class="text-xs opacity-80" id="online-users">在线: 0 人</p>
+                    </div>
+                    <button id="logout-btn" class="text-white hover:text-gray-200 transition-colors">
+                        <i class="fa fa-sign-out"></i>
+                    </button>
+                </div>
+            </header>
+            
+            <!-- 消息区域 -->
+            <main id="messages-container" class="flex-1 overflow-y-auto p-4 space-y-6 bg-gray-50 dark:bg-gray-900">
+                <div class="text-center">
+                    <span class="inline-block bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-3 py-1 rounded-full">
+                        今天
+                    </span>
+                </div>
+                
+                <!-- 系统消息 -->
+                <div class="text-center">
+                    <span class="inline-block bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-3 py-1 rounded-full animate-pulse">
+                        等待其他用户加入...
+                    </span>
+                </div>
+            </main>
+            
+            <!-- 输入区域 -->
+            <footer class="bg-white dark:bg-gray-800 p-3 border-t border-gray-200 dark:border-gray-700">
+                <div class="flex items-center space-x-2">
+                    <input type="text" id="message-input" 
+                        class="flex-1 px-4 py-2 rounded-full border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-primary transition-all outline-none"
+                        placeholder="输入消息...">
+                    <button id="send-btn" class="bg-primary hover:bg-primary/90 text-white rounded-full w-10 h-10 flex items-center justify-center transition-all transform hover:scale-110 active:scale-95 shadow-md">
+                        <i class="fa fa-paper-plane-o"></i>
+                    </button>
+                </div>
+                
+                <!-- 正在输入提示 -->
+                <div id="typing-indicator" class="hidden mt-2 ml-4 typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <script>
+        // DOM 元素
+        const loginScreen = document.getElementById('login-screen');
+        const chatScreen = document.getElementById('chat-screen');
+        const usernameInput = document.getElementById('username');
+        const loginBtn = document.getElementById('login-btn');
+        const logoutBtn = document.getElementById('logout-btn');
+        const messageInput = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        const messagesContainer = document.getElementById('messages-container');
+        const onlineUsersEl = document.getElementById('online-users');
+        const typingIndicator = document.getElementById('typing-indicator');
+        const themeToggle = document.getElementById('theme-toggle');
+        
+        // 主题切换
+        function initTheme() {
+            if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+                themeToggle.innerHTML = '<i class="fa fa-sun-o text-xl"></i>';
+            } else {
+                document.documentElement.classList.remove('dark');
+                themeToggle.innerHTML = '<i class="fa fa-moon-o text-xl"></i>';
+            }
+        }
+        
+        themeToggle.addEventListener('click', () => {
+            if (document.documentElement.classList.contains('dark')) {
+                document.documentElement.classList.remove('dark');
+                localStorage.theme = 'light';
+                themeToggle.innerHTML = '<i class="fa fa-moon-o text-xl"></i>';
+            } else {
+                document.documentElement.classList.add('dark');
+                localStorage.theme = 'dark';
+                themeToggle.innerHTML = '<i class="fa fa-sun-o text-xl"></i>';
+            }
+        });
+        
+        // 初始化主题
+        initTheme();
+        
+        // 全局变量
+        let username = '';
+        let socket;
+        
+        // 登录处理
+        loginBtn.addEventListener('click', () => {
+            const inputUsername = usernameInput.value.trim();
+            if (inputUsername) {
+                username = inputUsername;
+                connectToServer();
+                loginScreen.classList.add('hidden');
+                chatScreen.classList.remove('hidden');
+                messageInput.focus();
+            } else {
+                usernameInput.classList.add('border-red-500');
+                setTimeout(() => {
+                    usernameInput.classList.remove('border-red-500');
+                }, 2000);
+            }
+        });
+        
+        // 回车登录
+        usernameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                loginBtn.click();
+            }
+        });
+        
+        // 登出处理
+        logoutBtn.addEventListener('click', () => {
+            if (socket) {
+                socket.disconnect();
+            }
+            chatScreen.classList.add('hidden');
+            loginScreen.classList.remove('hidden');
+            usernameInput.value = '';
+            // 清空消息
+            messagesContainer.innerHTML = `
+                <div class="text-center">
+                    <span class="inline-block bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-3 py-1 rounded-full">
+                        今天
+                    </span>
+                </div>
+                <div class="text-center">
+                    <span class="inline-block bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-3 py-1 rounded-full animate-pulse">
+                        等待其他用户加入...
+                    </span>
+                </div>
+            `;
+        });
+        
+        // 发送消息
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (message && socket) {
+                socket.emit('chat message', {
+                    username,
+                    text: message,
+                    timestamp: new Date().toISOString()
+                });
+                messageInput.value = '';
+                // 停止正在输入提示
+                socket.emit('stop typing', username);
+            }
+        }
+        
+        sendBtn.addEventListener('click', sendMessage);
+        
+        // 回车发送消息
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // 正在输入提示
+        let typingTimeout;
+        messageInput.addEventListener('input', () => {
+            if (messageInput.value.trim() !== '' && socket) {
+                socket.emit('typing', username);
+                clearTimeout(typingTimeout);
+                typingTimeout = setTimeout(() => {
+                    socket.emit('stop typing', username);
+                }, 2000);
+            } else if (socket) {
+                socket.emit('stop typing', username);
+            }
+        });
+        
+        // 连接到服务器
+        function connectToServer() {
+            // 连接到WebSocket服务器
+            // 注意：实际部署时需要替换为你的服务器地址
+            socket = io('http://localhost:3000');
+            
+            // 发送登录信息
+            socket.emit('login', username);
+            
+            // 接收消息
+            socket.on('chat message', (msg) => {
+                addMessageToUI(msg);
+                // 隐藏正在输入提示
+                typingIndicator.classList.add('hidden');
+            });
+            
+            // 接收系统消息
+            socket.on('system message', (msg) => {
+                addSystemMessageToUI(msg);
+            });
+            
+            // 更新在线用户数
+            socket.on('user count', (count) => {
+                onlineUsersEl.textContent = `在线: ${count} 人`;
+            });
+            
+            // 正在输入提示
+            socket.on('user typing', (user) => {
+                if (user !== username) {
+                    typingIndicator.classList.remove('hidden');
+                }
+            });
+            
+            // 停止输入提示
+            socket.on('user stop typing', (user) => {
+                if (user !== username) {
+                    typingIndicator.classList.add('hidden');
+                }
+            });
+            
+            // 连接断开
+            socket.on('disconnect', () => {
+                addSystemMessageToUI('已断开连接，尝试重新连接...');
+            });
+            
+            // 重新连接
+            socket.on('reconnect', () => {
+                socket.emit('login', username);
+                addSystemMessageToUI('已重新连接');
+            });
+        }
+        
+        // 添加消息到界面
+        function addMessageToUI(msg) {
+            const isMyMessage = msg.username === username;
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${isMyMessage ? 'justify-end' : 'justify-start'}`;
+            
+            const messageBubble = document.createElement('div');
+            messageBubble.className = isMyMessage ? 'chat-bubble-mine' : 'chat-bubble-others';
+            
+            // 添加用户名（仅显示他人消息的用户名）
+            if (!isMyMessage) {
+                const usernameSpan = document.createElement('div');
+                usernameSpan.className = 'font-semibold text-xs mb-1 opacity-80';
+                usernameSpan.textContent = msg.username;
+                messageBubble.appendChild(usernameSpan);
+            }
+            
+            // 添加消息内容
+            const messageText = document.createElement('div');
+            messageText.textContent = msg.text;
+            messageBubble.appendChild(messageText);
+            
+            // 添加时间戳
+            const timeSpan = document.createElement('div');
+            const time = new Date(msg.timestamp);
+            timeSpan.className = `text-xs mt-1 opacity-70 ${isMyMessage ? 'text-right' : 'text-left'}`;
+            timeSpan.textContent = `${time.getHours().toString().padStart(2, '0')}:${time.getMinutes().toString().padStart(2, '0')}`;
+            messageBubble.appendChild(timeSpan);
+            
+            messageDiv.appendChild(messageBubble);
+            
+            // 移除"等待其他用户"提示（如果存在）
+            const waitingEl = messagesContainer.querySelector('.animate-pulse');
+            if (waitingEl) {
+                waitingEl.parentElement.remove();
+            }
+            
+            messagesContainer.appendChild(messageDiv);
+            // 滚动到底部
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        // 添加系统消息到界面
+        function addSystemMessageToUI(text) {
+            const systemDiv = document.createElement('div');
+            systemDiv.className = 'text-center';
+            
+            const systemSpan = document.createElement('span');
+            systemSpan.className = 'inline-block bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-3 py-1 rounded-full';
+            systemSpan.textContent = text;
+            
+            systemDiv.appendChild(systemSpan);
+            
+            // 移除"等待其他用户"提示（如果存在）
+            const waitingEl = messagesContainer.querySelector('.animate-pulse');
+            if (waitingEl) {
+                waitingEl.parentElement.remove();
+            }
+            
+            messagesContainer.appendChild(systemDiv);
+            // 滚动到底部
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    </script>
+</body>
+</html>
